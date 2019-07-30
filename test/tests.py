@@ -23,6 +23,19 @@ class TestRSP(TestCase):
     noack = False
 
 
+class GDBLauncher(object):
+
+    # Passing function arguments through registers
+    _arg2reg = {
+        "i386" : ("ecx", "edx") # fastcall calling convention is assumed
+      , "x86_64" : ("rdi", "rsi")
+      , "arm" : ("r0", "r1")
+    }.get(machine(), None)
+
+    def launch_server(self, port):
+        self._server = Popen(["gdbserver", "localhost:%u" % port, self.EXE])
+
+
 class TestUser(TestRSP):
     "Test for userspace program debugging."
 
@@ -37,13 +50,6 @@ class TestUser(TestRSP):
             self.skipTest("No RSP target for " + machine())
             return
 
-        # Passing function arguments through registers
-        self._arg2reg = {
-            "i386" : ("ecx", "edx") # fastcall calling convention is assumed
-          , "x86_64" : ("rdi", "rsi")
-          , "arm" : ("r0", "r1")
-        }.get(machine(), None)
-
         LDFLAGS = " ".join(("-l" + l) for l in self.LIBS)
         CFLAGS = " ".join("-D%s=%s" % (D, V) for D, V in self.DEFS.items())
         self.assertEqual(
@@ -53,12 +59,12 @@ class TestUser(TestRSP):
         rsp_port = find_free_port()
         if rsp_port is None:
             raise RuntimeError("Cannot find free port!")
-        self._port = port = str(rsp_port)
-        self._gdb = gdb = Popen(["gdbserver", "localhost:" + port, self.EXE])
+        self._port = str(rsp_port)
+        self.launch_server(rsp_port)
 
-        # Wait for gdb to start listening.
-        if not wait_for_tcp_port(rsp_port) or gdb.returncode is not None:
-            raise RuntimeError("gdbserver malfunction")
+        # Wait for server to start listening.
+        if not wait_for_tcp_port(rsp_port) or self._server.returncode is not None:
+            raise RuntimeError("GDB RSP server malfunction")
 
         self._target = rsp(self._port,
             elffile = self.EXE,
@@ -68,10 +74,13 @@ class TestUser(TestRSP):
         )
 
     def tearDown(self):
-        self._gdb.terminate()
+        self._server.terminate()
 
 
-class TestUserSimple(TestUser):
+class TestUserGDB(TestUser, GDBLauncher): pass
+
+
+class TestUserSimple(TestUserGDB):
     SRC = join(test_dir, "test-simple.c")
     # ".exe" is not required by nix but for Windows it is.
     EXE = join(test_dir, "test-simple.exe")
@@ -140,7 +149,7 @@ class TestUserSimple(TestUser):
         target.run(setpc=False)
 
 
-class TestUserCalls(TestUser):
+class TestUserCalls(TestUserGDB):
     DEFS = dict(NUM_CALLS = 10)
     SRC = join(test_dir, "test-calls.c")
     EXE = join(test_dir, "test-calls.exe")
@@ -160,7 +169,7 @@ class TestUserCalls(TestUser):
                          "incorrect breakpoint stops count")
 
 
-class TestUserThreads(TestUser):
+class TestUserThreads(TestUserGDB):
     DEFS = dict(NUM_THREADS = 20)
     SRC = join(test_dir, "test-threads.c")
     EXE = join(test_dir, "test-threads.exe")
@@ -182,7 +191,7 @@ class TestUserThreads(TestUser):
                          "incorrect breakpoint stops count")
 
 
-class TestUserMemory(TestUser):
+class TestUserMemory(TestUserGDB):
     DEFS = dict(NUB_KIBS = 10)
     SRC = join(test_dir, "test-memory.c")
     EXE = join(test_dir, "test-memory.exe")
@@ -226,7 +235,7 @@ class TestUserMemory(TestUser):
         target.run(setpc = False)
 
 
-class TestUserCallback(TestUser):
+class TestUserCallback(TestUserGDB):
     SRC = join(test_dir, "test-callback.c")
     EXE = join(test_dir, "test-callback.exe")
 
