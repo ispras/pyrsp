@@ -36,6 +36,20 @@ class GDBLauncher(object):
         self._server = Popen(["gdbserver", "localhost:%u" % port, self.EXE])
 
 
+
+class QemuUserLauncher(object):
+
+    _arg2reg = ("ecx", "edx")
+
+    def launch_server(self, port):
+        qargs = [
+            "qemu-i386",
+            "-g", str(port), # enable GDB stub
+            self.elf_path,
+        ]
+        self._server = Popen(qargs)
+
+
 class TestUser(TestRSP):
     "Test for userspace program debugging."
 
@@ -75,6 +89,9 @@ class TestUser(TestRSP):
 
     def tearDown(self):
         self._server.terminate()
+
+
+class TestUserQemu(TestUser, QemuUserLauncher): pass
 
 
 class TestUserGDB(TestUser, GDBLauncher): pass
